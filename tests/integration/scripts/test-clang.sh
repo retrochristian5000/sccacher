@@ -65,3 +65,62 @@ echo "Test 6: Test preprocessed C++ file with dependency arguments (cache hit ex
 $CXX -c /sccache/tests/integration/test_preprocessed.ii -o /tmp/test.o -MD -MF $DEPFILE
 test -f /tmp/test.o || { echo "ERROR: No compiler output found"; exit 1; }
 test ! -f $DEPFILE || { echo "ERROR: Dependency file found"; exit 1; }
+
+
+echo "Test 7: Clang PCH macro/AST cache invalidation"
+PCH_TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$PCH_TEST_DIR"' EXIT
+cat > "$PCH_TEST_DIR/pch_user.cc" <<'EOF'
+int whp_probe() { return whp_pch_value(); }
+EOF
+cat > "$PCH_TEST_DIR/main.cc" <<'EOF'
+extern int whp_probe();
+#ifndef EXPECTED_PCH_VALUE
+#error EXPECTED_PCH_VALUE must be defined
+#endif
+int main() { return whp_probe() == EXPECTED_PCH_VALUE ? 0 : 1; }
+EOF
+build_pch() {
+    printf '#define WHP_BUILD_VALUE %s\n' "$1" > "$PCH_TEST_DIR/pch.hxx"
+    cat >> "$PCH_TEST_DIR/pch.hxx" <<'EOF'
+__attribute__((always_inline)) inline int whp_pch_value() { return WHP_BUILD_VALUE; }
+EOF
+    # This is an implicit PCH producer; it must run through Clang, not a
+    # cached object pretending that its preprocessed output captures the AST.
+    $CXX -O2 -fno-pch-timestamp -x c++-header \
+        -c "$PCH_TEST_DIR/pch.hxx" -o "$PCH_TEST_DIR/pch.hxx.pch"
+}
+compile_pch_user() {
+    $CXX -O2 -Xclang -include-pch -Xclang "$PCH_TEST_DIR/pch.hxx.pch" \
+        -c "$PCH_TEST_DIR/pch_user.cc" -o "$PCH_TEST_DIR/pch_user.o"
+}
+check_pch_value() {
+    clang++ -DEXPECTED_PCH_VALUE="$1" \
+        "$PCH_TEST_DIR/pch_user.o" "$PCH_TEST_DIR/main.cc" \
+        -o "$PCH_TEST_DIR/check"
+    "$PCH_TEST_DIR/check"
+}
+build_pch 7
+compile_pch_user
+check_pch_value 7
+# Same consumer source, command line, and output location. Only the PCH
+# contents change; stale cache reuse must not preserve the old inline body.
+build_pch 19
+compile_pch_user
+check_pch_value 19
+# An unchanged PCH must also distinguish consuming -D macro values.
+cat > "$PCH_TEST_DIR/pch_user.cc" <<'EOF'
+#ifndef WHP_CONSUMER_VALUE
+#error WHP_CONSUMER_VALUE must be defined
+#endif
+int whp_probe() { return whp_pch_value() + WHP_CONSUMER_VALUE; }
+EOF
+$CXX -O2 -DWHP_CONSUMER_VALUE=1 \
+    -Xclang -include-pch -Xclang "$PCH_TEST_DIR/pch.hxx.pch" \
+    -c "$PCH_TEST_DIR/pch_user.cc" -o "$PCH_TEST_DIR/pch_user.o"
+check_pch_value 20
+$CXX -O2 -DWHP_CONSUMER_VALUE=3 \
+    -Xclang -include-pch -Xclang "$PCH_TEST_DIR/pch.hxx.pch" \
+    -c "$PCH_TEST_DIR/pch_user.cc" -o "$PCH_TEST_DIR/pch_user.o"
+check_pch_value 22
+echo "PASS: Clang PCH macro/AST cache invalidation"

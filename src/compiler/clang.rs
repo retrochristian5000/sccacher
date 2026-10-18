@@ -752,6 +752,18 @@ mod test {
     }
 
     #[test]
+    fn test_header_language_pch_producer_is_not_cached() {
+        // The ordinary -x c++-header driver form also produces a PCH without
+        // requiring -Xclang -emit-pch.
+        assert_eq!(
+            CompilerArguments::CannotCache("clang precompiled header", None),
+            parse_arguments_(stringvec![
+                "-c", "-x", "c++-header", "pch.hxx", "-o", "pch.hxx.pch"
+            ])
+        );
+    }
+
+    #[test]
     fn test_pch_consumer_hashes_binary_and_macro_flags() {
         use crate::compiler::c::HashKeyParams;
         use crate::util::Digest;

@@ -701,6 +701,20 @@ where
         Some(l) => l,
         None => cannot_cache!("unknown source language"),
     };
+    // Clang also generates PCH by compiling a header language directly,
+    // without spelling -emit-pch. Such outputs contain serialized macro/AST
+    // state that the ordinary -E output does not describe.
+    if kind == CCompilerKind::Clang
+        && matches!(
+            language,
+            Language::CHeader
+                | Language::CxxHeader
+                | Language::ObjectiveCHeader
+                | Language::ObjectiveCxxHeader
+        )
+    {
+        cannot_cache!("clang precompiled header");
+    }
     let mut outputs = HashMap::new();
     let output = match output_arg {
         // We can't cache compilation that doesn't go to a file
