@@ -828,6 +828,10 @@ pub fn parse_arguments(
                 Some(PreprocessorArgumentFlag)
                 | Some(PreprocessorArgument(_))
                 | Some(PreprocessorArgumentPath(_)) => &mut preprocessor_args,
+                Some(PreprocessorArgumentExtraHashFile(path)) => {
+                    extra_hash_files.push(cwd.join(path));
+                    &mut preprocessor_args
+                },
                 Some(DepArgumentPath(_)) | Some(DepTarget(_)) | Some(NeedDepTarget) => {
                     &mut dependency_args
                 }

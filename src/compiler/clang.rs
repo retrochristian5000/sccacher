@@ -743,10 +743,18 @@ mod test {
         assert_eq!(
             CompilerArguments::CannotCache("-emit-pch", None),
             parse_arguments_(stringvec![
-                "-Xclang", "-emit-pch",
-                "-Xclang", "-include", "-Xclang", "pch.hxx",
-                "-x", "c++-header", "-o", "pch.hxx.pch",
-                "-c", "pch.hxx.cxx"
+                "-Xclang",
+                "-emit-pch",
+                "-Xclang",
+                "-include",
+                "-Xclang",
+                "pch.hxx",
+                "-x",
+                "c++-header",
+                "-o",
+                "pch.hxx.pch",
+                "-c",
+                "pch.hxx.cxx"
             ])
         );
     }
@@ -758,7 +766,12 @@ mod test {
         assert_eq!(
             CompilerArguments::CannotCache("clang precompiled header", None),
             parse_arguments_(stringvec![
-                "-c", "-x", "c++-header", "pch.hxx", "-o", "pch.hxx.pch"
+                "-c",
+                "-x",
+                "c++-header",
+                "pch.hxx",
+                "-o",
+                "pch.hxx.pch"
             ])
         );
     }
@@ -769,9 +782,18 @@ mod test {
         use crate::util::Digest;
 
         let a = parses!(
-            "-c", "pch_user.cc", "-o", "pch_user.o",
-            "-Xclang", "-include-pch", "-Xclang", "cmake_pch.hxx.pch",
-            "-D", "WHP_MODE=1", "-U", "OLD_WHP_MODE"
+            "-c",
+            "pch_user.cc",
+            "-o",
+            "pch_user.o",
+            "-Xclang",
+            "-include-pch",
+            "-Xclang",
+            "cmake_pch.hxx.pch",
+            "-D",
+            "WHP_MODE=1",
+            "-U",
+            "OLD_WHP_MODE"
         );
         assert_eq!(
             a.extra_hash_files,
@@ -785,8 +807,12 @@ mod test {
 
         // The directly spelled driver argument needs the same file hashing.
         let direct = parses!(
-            "-c", "pch_user.cc", "-o", "pch_user.o",
-            "-include-pch", "cmake_pch.hxx.pch"
+            "-c",
+            "pch_user.cc",
+            "-o",
+            "pch_user.o",
+            "-include-pch",
+            "cmake_pch.hxx.pch"
         );
         assert_eq!(a.extra_hash_files, direct.extra_hash_files);
 
@@ -802,11 +828,23 @@ mod test {
         };
         assert_ne!(key(&a.common_args, &pch_v1), key(&a.common_args, &pch_v2));
         let other_macro = parses!(
-            "-c", "pch_user.cc", "-o", "pch_user.o",
-            "-Xclang", "-include-pch", "-Xclang", "cmake_pch.hxx.pch",
-            "-D", "WHP_MODE=2", "-U", "OLD_WHP_MODE"
+            "-c",
+            "pch_user.cc",
+            "-o",
+            "pch_user.o",
+            "-Xclang",
+            "-include-pch",
+            "-Xclang",
+            "cmake_pch.hxx.pch",
+            "-D",
+            "WHP_MODE=2",
+            "-U",
+            "OLD_WHP_MODE"
         );
-        assert_ne!(key(&a.common_args, &pch_v1), key(&other_macro.common_args, &pch_v1));
+        assert_ne!(
+            key(&a.common_args, &pch_v1),
+            key(&other_macro.common_args, &pch_v1)
+        );
     }
 
     #[test]
