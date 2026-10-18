@@ -221,7 +221,9 @@ counted_array!(pub static ARGS: [ArgInfo<gcc::ArgData>; _] = [
     take_arg!("-dependency-file", PathBuf, Separated, DepArgumentPath),
     take_arg!("-dsym-dir", OsString, CanBeSeparated, TooHard),
     take_arg!("-dumpdir", OsString, CanBeSeparated, TooHard),
-    flag!("-emit-pch", PassThroughFlag),
+    // PCH generation can serialize hidden macro/AST state that -E does not
+    // describe; compile it directly rather than replaying cached PCH bytes.
+    flag!("-emit-pch", TooHardFlag),
     flag!("-fbuiltin-module-map", TooHardFlag),
     take_arg!("-fcodegen-data-generate", OsString, Concatenated(b'='), TooHard),
     flag!("-fcolor-diagnostics", DiagnosticsColorFlag),
@@ -273,7 +275,7 @@ counted_array!(pub static ARGS: [ArgInfo<gcc::ArgData>; _] = [
     take_arg!("-fxray-never-instrument", PathBuf, Concatenated(b'='), ExtraHashFile),
     take_arg!("-gcc-toolchain", OsString, Separated, PassThrough),
     flag!("-gcodeview", PassThroughFlag),
-    take_arg!("-include-pch", PathBuf, CanBeSeparated, PreprocessorArgumentPath),
+    take_arg!("-include-pch", PathBuf, CanBeSeparated, PreprocessorArgumentExtraHashFile),
     flag!("-integrated-as", IntegratedAs),
     take_arg!("-ivfsoverlay", PathBuf, CanBeSeparated, PreprocessorArgumentPath),
     take_arg!("-load", PathBuf, Separated, ExtraHashFile),
@@ -736,38 +738,63 @@ mod test {
 
     #[test]
     fn test_emit_pch() {
-        let a = parses!(
-            "-Xclang",
-            "-emit-pch",
-            "-Xclang",
-            "-include",
-            "-Xclang",
-            "pch.hxx",
-            "-x",
-            "c++-header",
-            "-o",
-            "pch.hxx.pch",
-            "-c",
-            "pch.hxx.cxx"
-        );
-        assert_eq!(Some("pch.hxx.cxx"), a.input.to_str());
-        assert_eq!(Language::CxxHeader, a.language);
-        assert_map_contains!(
-            a.outputs,
-            (
-                "obj",
-                ArtifactDescriptor {
-                    path: PathBuf::from("pch.hxx.pch"),
-                    optional: false
-                }
-            )
-        );
-        println!("{:?}", a);
+        // Never cache a PCH producer: preprocessing does not serialize every
+        // hidden AST and macro dependency used by Clang's PCH writer.
         assert_eq!(
-            ovec!["-Xclang", "-include", "-Xclang", "pch.hxx"],
-            a.preprocessor_args
+            CompilerArguments::CannotCache("-emit-pch", None),
+            parse_arguments_(stringvec![
+                "-Xclang", "-emit-pch",
+                "-Xclang", "-include", "-Xclang", "pch.hxx",
+                "-x", "c++-header", "-o", "pch.hxx.pch",
+                "-c", "pch.hxx.cxx"
+            ])
         );
-        assert_eq!(ovec!["-Xclang", "-emit-pch"], a.common_args);
+    }
+
+    #[test]
+    fn test_pch_consumer_hashes_binary_and_macro_flags() {
+        use crate::compiler::c::HashKeyParams;
+        use crate::util::Digest;
+
+        let a = parses!(
+            "-c", "pch_user.cc", "-o", "pch_user.o",
+            "-Xclang", "-include-pch", "-Xclang", "cmake_pch.hxx.pch",
+            "-D", "WHP_MODE=1", "-U", "OLD_WHP_MODE"
+        );
+        assert_eq!(
+            a.extra_hash_files,
+            vec![std::env::current_dir().unwrap().join("cmake_pch.hxx.pch")]
+        );
+        assert_eq!(
+            a.preprocessor_args,
+            ovec!["-Xclang", "-include-pch", "-Xclang", "cmake_pch.hxx.pch"]
+        );
+        assert_eq!(a.common_args, ovec!["-DWHP_MODE=1", "-UOLD_WHP_MODE"]);
+
+        // The directly spelled driver argument needs the same file hashing.
+        let direct = parses!(
+            "-c", "pch_user.cc", "-o", "pch_user.o",
+            "-include-pch", "cmake_pch.hxx.pch"
+        );
+        assert_eq!(a.extra_hash_files, direct.extra_hash_files);
+
+        // Clang may return identical preprocessor output for two PCH states.
+        // The PCH digest must distinguish both object and direct-mode keys.
+        let visible_output = b"int use_pch;\\n";
+        let pch_v1 = Digest::reader_sync(&b"macro-hidden-pch-v1"[..]).unwrap();
+        let pch_v2 = Digest::reader_sync(&b"macro-hidden-pch-v2"[..]).unwrap();
+        let key = |common: &[OsString], pch_digest: &str| {
+            HashKeyParams::new("compiler", Language::Cxx, common, visible_output)
+                .with_extra_hashes(&[pch_digest.to_string()])
+                .compute()
+        };
+        assert_ne!(key(&a.common_args, &pch_v1), key(&a.common_args, &pch_v2));
+        let other_macro = parses!(
+            "-c", "pch_user.cc", "-o", "pch_user.o",
+            "-Xclang", "-include-pch", "-Xclang", "cmake_pch.hxx.pch",
+            "-D", "WHP_MODE=2", "-U", "OLD_WHP_MODE"
+        );
+        assert_ne!(key(&a.common_args, &pch_v1), key(&other_macro.common_args, &pch_v1));
     }
 
     #[test]

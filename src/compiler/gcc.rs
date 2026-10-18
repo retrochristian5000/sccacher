@@ -146,6 +146,8 @@ ArgData! { pub
     PreprocessorArgumentFlag,
     PreprocessorArgument(OsString),
     PreprocessorArgumentPath(PathBuf),
+    // Precompiled inputs must affect both preprocessing and the object cache key.
+    PreprocessorArgumentExtraHashFile(PathBuf),
     // Used for arguments that shouldn't affect the computed hash
     UnhashedFlag,
     Unhashed(OsString),
@@ -440,6 +442,7 @@ where
             | Some(PreprocessorArgumentFlag)
             | Some(PreprocessorArgument(_))
             | Some(PreprocessorArgumentPath(_))
+            | Some(PreprocessorArgumentExtraHashFile(_))
             | Some(PassThrough(_))
             | Some(PassThroughPath(_))
             | Some(UnhashedFlag)
@@ -540,6 +543,12 @@ where
             Some(PreprocessorArgumentFlag) | Some(PreprocessorArgumentPath(_)) => {
                 &mut preprocessor_args
             }
+            Some(PreprocessorArgumentExtraHashFile(path)) => {
+                // Clang's -E output can omit declarations and macro state loaded
+                // from a PCH; hash the binary regardless of preprocessor output.
+                extra_hash_files.push(cwd.join(path));
+                &mut preprocessor_args
+            }
             Some(DepArgumentPath(_)) | Some(NeedDepTarget) => &mut dependency_args,
             Some(DoCompilation)
             | Some(Language(_))
@@ -635,6 +644,11 @@ where
             Some(PreprocessorArgumentFlag)
             | Some(PreprocessorArgument(_))
             | Some(PreprocessorArgumentPath(_)) => &mut preprocessor_args,
+            Some(PreprocessorArgumentExtraHashFile(path)) => {
+                // -Xclang -include-pch -Xclang <path> is CMake's PCH consumer.
+                extra_hash_files.push(cwd.join(path));
+                &mut preprocessor_args
+            }
             Some(DepTarget(_)) | Some(DepArgumentPath(_)) | Some(NeedDepTarget) => {
                 &mut dependency_args
             }
