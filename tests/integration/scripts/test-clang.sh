@@ -149,3 +149,31 @@ $CXX -O2 -DWHP_CONSUMER_VALUE=3 \
     -c "$PCH_TEST_DIR/pch_user.cc" -o "$PCH_TEST_DIR/pch_user.o"
 check_pch_value 22
 echo "PASS: Clang PCH macro/AST cache invalidation"
+# CMake's LLVM PCH producer is a C++ translation unit using -emit-pch.
+# It must pass through to Clang; its dependents can still hit the object cache.
+echo "Test 8: CMake-style PCH producer, consumer and object cache"
+printf '\\n' > "$PCH_TEST_DIR/cmake_pch.hxx.cxx"
+$CXX -O2 -Xclang -fno-pch-timestamp -Xclang -emit-pch \
+    -Xclang -include -Xclang "$PCH_TEST_DIR/pch.hxx" -x c++ \
+    -c "$PCH_TEST_DIR/cmake_pch.hxx.cxx" -o "$PCH_TEST_DIR/cmake_pch.hxx.pch"
+test -s "$PCH_TEST_DIR/cmake_pch.hxx.pch" || {
+    echo "FAIL: CMake-style PCH producer did not write a PCH"
+    exit 1
+}
+cat > "$PCH_TEST_DIR/cmake_user.cc" <<'EOF'
+int whp_cmake_probe() { return whp_pch_value(); }
+EOF
+compile_cmake_consumer() {
+    $CXX -O2 -Xclang -include-pch -Xclang "$PCH_TEST_DIR/cmake_pch.hxx.pch" \
+        -c "$PCH_TEST_DIR/cmake_user.cc" -o "$PCH_TEST_DIR/cmake_user.o"
+}
+compile_cmake_consumer
+hits_before_reuse=$(pch_cache_hits)
+rm -f "$PCH_TEST_DIR/cmake_user.o"
+compile_cmake_consumer
+hits_after_reuse=$(pch_cache_hits)
+test "$hits_after_reuse" -gt "$hits_before_reuse" || {
+    echo "FAIL: CMake-style PCH consumer did not hit the object cache"
+    exit 1
+}
+echo "PASS: CMake-style PCH consumer cache hit"
