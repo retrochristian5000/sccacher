@@ -1,0 +1,36 @@
+name: WHP Clang C++ PCH cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/whp-clang-pch-cache.yml'
+      - 'src/compiler/c.rs'
+      - 'src/compiler/clang.rs'
+      - 'src/compiler/gcc.rs'
+      - 'tests/integration/scripts/test-clang.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clang-pch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out pinned fork
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Build local sccacher (no optional backends)
+        run: cargo build --locked --no-default-features --bin sccache
+
+      - name: Exercise Clang PCH producers and C++ object cache hits
+        run: |
+          mkdir -p target/integration-cargo-cache target/integration-coverage
+          cd tests/integration
+          docker compose --profile clang run --quiet-pull --rm test-clang
