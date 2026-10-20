@@ -152,7 +152,7 @@ echo "PASS: Clang PCH macro/AST cache invalidation"
 # CMake's LLVM PCH producer is a C++ translation unit using -emit-pch.
 # It must pass through to Clang; its dependents can still hit the object cache.
 echo "Test 8: CMake-style PCH producer, consumer and object cache"
-printf '\\n' > "$PCH_TEST_DIR/cmake_pch.hxx.cxx"
+: > "$PCH_TEST_DIR/cmake_pch.hxx.cxx"
 $CXX -O2 -Xclang -fno-pch-timestamp -Xclang -emit-pch \
     -Xclang -include -Xclang "$PCH_TEST_DIR/pch.hxx" -x c++ \
     -c "$PCH_TEST_DIR/cmake_pch.hxx.cxx" -o "$PCH_TEST_DIR/cmake_pch.hxx.pch"
