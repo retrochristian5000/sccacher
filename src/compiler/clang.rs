@@ -760,6 +760,33 @@ mod test {
     }
 
     #[test]
+    fn test_cmake_pch_producer_with_timestamp_flag_is_not_cached() {
+        // CMake's PCH rule uses a C++ source plus -Xclang -emit-pch and
+        // -Xclang -include. Cache the dependent objects, never the PCH itself
+        // until the producer's transitive AST dependencies are fully tracked.
+        assert_eq!(
+            CompilerArguments::CannotCache("-emit-pch", None),
+            parse_arguments_(stringvec![
+                "-O2",
+                "-Xclang",
+                "-fno-pch-timestamp",
+                "-Xclang",
+                "-emit-pch",
+                "-Xclang",
+                "-include",
+                "-Xclang",
+                "cmake_pch.hxx",
+                "-x",
+                "c++",
+                "-c",
+                "cmake_pch.hxx.cxx",
+                "-o",
+                "cmake_pch.hxx.pch"
+            ])
+        );
+    }
+
+    #[test]
     fn test_header_language_pch_producer_is_not_cached() {
         // The ordinary -x c++-header driver form also produces a PCH without
         // requiring -Xclang -emit-pch.
