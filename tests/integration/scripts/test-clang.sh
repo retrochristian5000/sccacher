@@ -87,7 +87,7 @@ __attribute__((always_inline)) inline int whp_pch_value() { return WHP_BUILD_VAL
 EOF
     # This is an implicit PCH producer; it must run through Clang, not a
     # cached object pretending that its preprocessed output captures the AST.
-    $CXX -O2 -fno-pch-timestamp -x c++-header \
+    $CXX -O2 -Xclang -fno-pch-timestamp -x c++-header \
         -c "$PCH_TEST_DIR/pch.hxx" -o "$PCH_TEST_DIR/pch.hxx.pch"
 }
 compile_pch_user() {
@@ -100,14 +100,39 @@ check_pch_value() {
         -o "$PCH_TEST_DIR/check"
     "$PCH_TEST_DIR/check"
 }
+# A PCH consumer should be cached, while the PCH producer above remains
+# uncacheable. Count hits relative to this point, not earlier compiler tests.
+pch_cache_hits() {
+    "$SCCACHE" --show-stats --stats-format=json |
+        python3 -c 'import json,sys; print(json.load(sys.stdin).get("stats", {}).get("cache_hits", {}).get("counts", {}).get("C/C++", 0))'
+}
 build_pch 7
 compile_pch_user
 check_pch_value 7
+hits_before_reuse=$(pch_cache_hits)
+rm -f "$PCH_TEST_DIR/pch_user.o"
+compile_pch_user
+check_pch_value 7
+hits_after_reuse=$(pch_cache_hits)
+test "$hits_after_reuse" -gt "$hits_before_reuse" || {
+    echo "FAIL: unchanged PCH consumer did not hit the C++ object cache"
+    exit 1
+}
 # Same consumer source, command line, and output location. Only the PCH
 # contents change; stale cache reuse must not preserve the old inline body.
 build_pch 19
 compile_pch_user
 check_pch_value 19
+# The new PCH gets its own cache entry. A repeated invocation must hit it.
+hits_before_reuse=$(pch_cache_hits)
+rm -f "$PCH_TEST_DIR/pch_user.o"
+compile_pch_user
+check_pch_value 19
+hits_after_reuse=$(pch_cache_hits)
+test "$hits_after_reuse" -gt "$hits_before_reuse" || {
+    echo "FAIL: updated PCH consumer did not hit the C++ object cache"
+    exit 1
+}
 # An unchanged PCH must also distinguish consuming -D macro values.
 cat > "$PCH_TEST_DIR/pch_user.cc" <<'EOF'
 #ifndef WHP_CONSUMER_VALUE
