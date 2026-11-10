@@ -288,6 +288,30 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_cache_keys_are_rejected_without_io() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let disk = DiskCache::new(
+            tempdir.path(),
+            1024 * 1024,
+            runtime.handle(),
+            PreprocessorCacheModeConfig::default(),
+            CacheMode::ReadWrite,
+            vec![],
+        );
+        runtime.block_on(async {
+            assert!(disk.get("../escape").await.is_err());
+            assert!(disk.get_raw("x").await.is_err());
+            assert!(matches!(disk.get_path("éabc").await, GetPathResult::Miss));
+            assert!(disk.put_raw("../escape", Bytes::new()).await.is_err());
+            assert!(disk.get_preprocessor_cache_entry("ab").await.unwrap().is_none());
+        });
+    }
+
+    #[test]
     fn test_disk_cache_type_name() {
         let tempdir = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
