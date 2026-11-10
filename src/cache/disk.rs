@@ -70,16 +70,24 @@ impl DiskCache {
     }
 }
 
+/// Validate digest-shaped cache keys before using them as filesystem paths.
+fn valid_cache_key(key: &str) -> bool {
+    key.len() >= 3 && key.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// Make a path to the cache entry with key `key`.
-fn make_key_path(key: &str) -> PathBuf {
-    Path::new(&key[0..1]).join(&key[1..2]).join(key)
+fn make_key_path(key: &str) -> Result<PathBuf> {
+    if !valid_cache_key(key) {
+        return Err(anyhow!("Invalid disk cache key"));
+    }
+    Ok(Path::new(&key[0..1]).join(&key[1..2]).join(key))
 }
 
 #[async_trait]
 impl Storage for DiskCache {
     async fn get(&self, key: &str) -> Result<Cache> {
         trace!("DiskCache::get({})", key);
-        let path = make_key_path(key);
+        let path = make_key_path(key)?;
         let lru = self.lru.clone();
         let key = key.to_owned();
 
@@ -115,7 +123,7 @@ impl Storage for DiskCache {
 
     async fn get_raw(&self, key: &str) -> Result<Option<Bytes>> {
         trace!("DiskCache::get_raw({})", key);
-        let path = make_key_path(key);
+        let path = make_key_path(key)?;
         let lru = self.lru.clone();
         let key = key.to_owned();
 
@@ -143,7 +151,10 @@ impl Storage for DiskCache {
     }
 
     async fn get_path(&self, key: &str) -> GetPathResult {
-        let rel_path = make_key_path(key);
+        let rel_path = match make_key_path(key) {
+            Ok(path) => path,
+            Err(_) => return GetPathResult::Miss,
+        };
         let lru = self.lru.clone();
         self.pool
             .spawn_blocking(move || {
@@ -177,7 +188,7 @@ impl Storage for DiskCache {
         }
 
         let lru = self.lru.clone();
-        let key = make_key_path(key);
+        let key = make_key_path(key)?;
 
         self.pool
             .spawn_blocking(move || {
@@ -219,6 +230,9 @@ impl Storage for DiskCache {
         &self.basedirs
     }
     async fn get_preprocessor_cache_entry(&self, key: &str) -> Result<Option<Box<dyn ReadSeek>>> {
+        if !valid_cache_key(key) {
+            return Ok(None);
+        }
         let key = normalize_key(key);
         Ok(self
             .preprocessor_cache
@@ -237,6 +251,9 @@ impl Storage for DiskCache {
             return Err(anyhow!("Cannot write to a read-only cache"));
         }
 
+        if !valid_cache_key(key) {
+            return Err(anyhow!("Invalid preprocessor cache key"));
+        }
         let key = normalize_key(key);
         let mut f = self
             .preprocessor_cache
@@ -258,6 +275,17 @@ impl Storage for DiskCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_disk_cache_key_paths() {
+        assert_eq!(
+            make_key_path("012345abcdef").unwrap(),
+            Path::new("0").join("1").join("012345abcdef")
+        );
+        for invalid in ["", "0", "01", "../escape", "ab/escape", "éabc"] {
+            assert!(make_key_path(invalid).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn test_disk_cache_type_name() {
